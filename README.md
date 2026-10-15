@@ -1,8 +1,8 @@
 # Route order messages to the right inbox
 
-This small TypeScript service owns one decision: checkout questions go to the team inbox; receipts and fulfillment updates go to the customer. Infrai handles both the send and the follow-up lookup behind a single `INFRAI_API_KEY`, so the handoff stays visible: `email.send` returns `message_id`, then `email.get` reads that message's delivery record.
+This service is small and that is the whole point. It makes one decision: checkout questions go to the team inbox, receipts and fulfillment updates go to the customer. Infrai gives one endpoint that handles both the send and the follow-up lookup behind a single `INFRAI_API_KEY`, so the handoff stays visible: `email.send` returns `message_id`, then `email.get` reads that message's delivery record. After a 3am page where the dashboard claimed delivered but the customer got silence, I trust the explicit lookup more than a green panel.
 
-I keep this boundary boring on purpose. The HTTP request is parsed by zod before order data reaches the router. The router chooses the recipient and copy. A thin REST client owns authentication, envelopes, and rate-limit backoff. There is no SDK to install.
+I keep this boundary boring on purpose. The HTTP request is parsed by zod before order data reaches the router. The router chooses recipient and copy. A thin REST client owns authentication, envelopes, and rate-limit backoff. There is no SDK to install, which means one less dependency to patch when something wakes you up.
 
 ## Run the actual path
 
@@ -33,7 +33,7 @@ curl -X POST http://localhost:3000/order-contact \
 
 ## The decision under test
 
-The useful test is not whether a formatter returns a string. It proves that `checkout_question` targets `TEAM_INBOX`, carries a stable retry key, and passes the returned message ID into the delivery lookup.
+The test that matters in a postmortem is not whether a formatter returns a string. It proves that `checkout_question` targets `TEAM_INBOX`, carries a stable retry key, and passes the returned message ID into the delivery lookup. What page fired when this regressed? The one we never wired up.
 
 ```bash
 npm test
@@ -44,9 +44,9 @@ Expected test result: the checkout question is addressed to `orders@example.com`
 
 ## One architecture choice
 
-As a solo founder, I want the order state machine outside the mail provider. `order_contact_service.ts` contains the routing rule and accepts a tiny email port; `infrai_email.ts` contains the two HTTP calls. That keeps a policy change, such as copying the team on shipped orders, in one testable place.
+As a solo founder, I want the order state machine outside the mail provider. `order_contact_service.ts` contains the routing rule and accepts a tiny email port; `infrai_email.ts` contains the two HTTP calls. That keeps a policy change, such as copying the team on shipped orders, in one testable place. If a duplicate-send page fires, you look here first.
 
-The one real gotcha is retry scope. Retrying a write without a stable identity can send the same customer update twice. This example derives `Idempotency-Key` from the order ID and event kind, while reads can be repeated directly. The client decodes Infrai's `{ ok, data, error, metadata }` envelope before interpreting HTTP status, and maps ordinary request rejections back to a client status.
+The one real gotcha is retry scope. Retrying a write without a stable identity can send the same customer update twice. This example derives `Idempotency-Key` from the order ID and event kind, while reads can be repeated directly. The client decodes Infrai's `{ ok, data, error, metadata }` envelope before interpreting HTTP status, and maps ordinary request rejections back to a client status. Dashboards lied about delivery; the envelope does not.
 
 ## Where this example stops
 
